@@ -20,8 +20,8 @@ const val CANT_RUN_COMMON = "throw UnsupportedOperationException(\"\"\"\nCommon 
 private val CONSTRUCTOR_LESS_KINDS = setOf(ClassKind.OBJECT, ClassKind.INTERFACE)
 
 class StubProcessor(private val environment: SymbolProcessorEnvironment) : SymbolProcessor {
-    private fun mapModifiers(modifiers: Iterable<Modifier>) = modifiers.mapNotNull {
-        if (it == Modifier.EXPECT) {
+    private fun mapModifiers(modifiers: Iterable<Modifier>, removeFinal: Boolean = false) = modifiers.mapNotNull {
+        if (it == Modifier.EXPECT || removeFinal && it == Modifier.FINAL) {
             null
         } else {
             it.toKModifier()
@@ -141,7 +141,7 @@ class StubProcessor(private val environment: SymbolProcessorEnvironment) : Symbo
         // Adding modifiers to primary constructor results in `public public constructor(...)`
         if (!primaryConstructor) {
             function.extensionReceiver?.toTypeName()?.let(builder::receiver)
-            builder.addModifiers(mapModifiers(function.modifiers))
+            builder.addModifiers(mapModifiers(function.modifiers, function.isConstructor()))
         }
 
         builder.addAnnotations(mapAnnotations(function.annotations))
