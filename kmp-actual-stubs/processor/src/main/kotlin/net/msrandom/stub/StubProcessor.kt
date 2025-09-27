@@ -8,8 +8,25 @@ import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.processing.SymbolProcessor
 import com.google.devtools.ksp.processing.SymbolProcessorEnvironment
 import com.google.devtools.ksp.processing.SymbolProcessorProvider
-import com.google.devtools.ksp.symbol.*
-import com.squareup.kotlinpoet.*
+import com.google.devtools.ksp.symbol.ClassKind
+import com.google.devtools.ksp.symbol.KSAnnotated
+import com.google.devtools.ksp.symbol.KSAnnotation
+import com.google.devtools.ksp.symbol.KSClassDeclaration
+import com.google.devtools.ksp.symbol.KSDeclaration
+import com.google.devtools.ksp.symbol.KSFunctionDeclaration
+import com.google.devtools.ksp.symbol.KSName
+import com.google.devtools.ksp.symbol.KSPropertyAccessor
+import com.google.devtools.ksp.symbol.KSPropertyDeclaration
+import com.google.devtools.ksp.symbol.KSType
+import com.google.devtools.ksp.symbol.KSTypeReference
+import com.google.devtools.ksp.symbol.Modifier
+import com.squareup.kotlinpoet.AnnotationSpec
+import com.squareup.kotlinpoet.FileSpec
+import com.squareup.kotlinpoet.FunSpec
+import com.squareup.kotlinpoet.KModifier
+import com.squareup.kotlinpoet.ParameterSpec
+import com.squareup.kotlinpoet.PropertySpec
+import com.squareup.kotlinpoet.TypeSpec
 import com.squareup.kotlinpoet.ksp.toClassName
 import com.squareup.kotlinpoet.ksp.toKModifier
 import com.squareup.kotlinpoet.ksp.toTypeName
@@ -94,6 +111,21 @@ class StubProcessor(private val environment: SymbolProcessorEnvironment) : Symbo
 
         val canHaveConstructor = type.classKind !in CONSTRUCTOR_LESS_KINDS
 
+        val superClass = type.superTypes.firstOrNull {
+            val resolved = it.resolve()
+            val classKind = (resolved.declaration as? KSClassDeclaration)?.classKind
+            classKind != ClassKind.INTERFACE && classKind != null && !it.toTypeName().toString().endsWith("Any")
+        }?.toTypeName()?.apply {
+            typeBuilder.superclass(this)
+        }
+
+        // TODO Use Any::class.qualifiedName
+        typeBuilder.addSuperinterfaces(
+            type.superTypes.map(KSTypeReference::toTypeName)
+                .filterNot { it.toString().endsWith("Any") || it == superClass }.toList()
+        )
+
+
         if (type.classKind == ClassKind.ENUM_CLASS) {
             for (declaration in type.declarations) {
                 typeBuilder.addEnumConstant(declaration.simpleName.asString())
@@ -101,6 +133,9 @@ class StubProcessor(private val environment: SymbolProcessorEnvironment) : Symbo
         } else {
             if (canHaveConstructor) {
                 typeBuilder.primaryConstructor(type.primaryConstructor?.let { functionSpec(it, true) })
+                type.primaryConstructor?.parameters?.forEach {
+                    typeBuilder.addSuperclassConstructorParameter(CANT_RUN_COMMON)
+                }
             }
 
             typeBuilder.addFunctions(
@@ -118,11 +153,6 @@ class StubProcessor(private val environment: SymbolProcessorEnvironment) : Symbo
 
             typeBuilder.addProperties(type.getDeclaredProperties().map(::propertySpec).toList())
         }
-
-        // TODO Use Any::class.qualifiedName
-        typeBuilder.addSuperinterfaces(
-            type.superTypes.map(KSTypeReference::toTypeName).filterNot { it.toString().endsWith("Any") }.toList()
-        )
 
         spec.addType(typeBuilder.build())
     }
@@ -142,6 +172,8 @@ class StubProcessor(private val environment: SymbolProcessorEnvironment) : Symbo
         if (!primaryConstructor) {
             function.extensionReceiver?.toTypeName()?.let(builder::receiver)
             builder.addModifiers(mapModifiers(function.modifiers, function.isConstructor()))
+        } else {
+            builder.addModifiers(KModifier.ACTUAL)
         }
 
         builder.addAnnotations(mapAnnotations(function.annotations))
